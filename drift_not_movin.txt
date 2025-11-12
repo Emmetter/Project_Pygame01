@@ -1,0 +1,140 @@
+# ...existing code...
+import pygame as pg
+import math
+
+SCREEN_WIDTH = int(1920 / 2)
+SCREEN_HEIGHT = int(1080 / 2)
+FPS = 60
+PLAYER_W = 40
+PLAYER_H = 20
+
+ACCELERATION = 1500.0     # px/s^2 (accélération avant/arrière)
+MAX_SPEED = 800.0         # px/s
+FORWARD_DRAG = 1.0        # résistance linéaire (px/s -> réduit vitesse avant)
+GRIP = 8.0                # adhérence normale (réduction de la composante latérale)
+DRIFT_GRIP = 1.0          # adhérence pendant drift (plus bas => glisse)
+STEER_SPEED = math.radians(180.0)  # rad/s maximum de rotation de la direction
+DRIFT_SLIP_FORCE = 400.0  # force latérale ajoutée pendant le drift (pour accentuer la dérive)
+
+def clamp(v, a, b):
+    return max(a, min(b, v))
+
+def main():
+    pg.init()
+    screen = pg.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
+    clock = pg.time.Clock()
+    running = True
+
+    dt = 0.0
+    # état du véhicule
+    pos = pg.Vector2(screen.get_width() / 2, screen.get_height() / 2)
+    velocity = pg.Vector2(0, 0)
+    angle = 0.0  # orientation en radians (0 = vers la droite)
+
+    # surface du joueur (déssinée centré)
+    car_surf = pg.Surface((PLAYER_W, PLAYER_H), pg.SRCALPHA)
+    pg.draw.rect(car_surf, (30, 144, 255), (0, 0, PLAYER_W, PLAYER_H))
+
+    font = pg.font.SysFont(None, 18)
+
+    while running:
+        dt = clock.tick(FPS) / 1000.0
+        for event in pg.event.get():
+            if event.type == pg.QUIT:
+                running = False
+
+        # INPUT : W/S pour avancer/reculer along forward, A/D pour tourner, SPACE pour drift
+        keys = pg.key.get_pressed()
+        throttle = 0.0
+        if keys[pg.K_w] or keys[pg.K_UP]:
+            throttle += 1.0
+        if keys[pg.K_s] or keys[pg.K_DOWN]:
+            throttle -= 1.0
+        steer = 0.0
+        if keys[pg.K_a] or keys[pg.K_LEFT]:
+            steer -= 1.0
+        if keys[pg.K_d] or keys[pg.K_RIGHT]:
+            steer += 1.0
+        drifting = keys[pg.K_SPACE]
+
+        # vecteurs locaux : forward et right (dépendent de l'angle)
+        forward = pg.Vector2(math.cos(angle), math.sin(angle))
+        right = pg.Vector2(-forward.y, forward.x)  # rotation de 90° (vecteur latéral)
+
+        # Projection de la vitesse actuelle sur axes local (forward & right)
+        vel_f = forward * velocity.dot(forward)   # composante avant
+        vel_r = right * velocity.dot(right)       # composante latérale
+
+        # Accélération dans la direction avant (local)
+        if throttle != 0.0:
+            # On applique l'accélération locale
+            velocity += forward * (throttle * ACCELERATION * dt)
+
+        # Limiter la vitesse totale
+        speed = velocity.length()
+        if speed > MAX_SPEED:
+            velocity.scale_to_length(MAX_SPEED)
+
+        # Steering : tourner l'orientation en fonction du steer et de la vitesse
+        # On modère l'efficacité du volant selon la vitesse (plus vite -> plus d'effet possible)
+        # Utilise la projection avant pour réduire l'effet si vitesse est négative (recul)
+        forward_speed = vel_f.length() * (1 if velocity.dot(forward) >= 0 else -1)
+        steer_strength = clamp(abs(forward_speed) / MAX_SPEED, 0.0, 1.0)
+        angle += steer * steer_strength * STEER_SPEED * dt
+
+        # DRIFT EFFECT:
+        # - si on ne drift pas -> forte réduction de la composante latérale (grip élevé)
+        # - si on drift -> faible réduction (glisse), on peut ajouter une impulsion latérale
+        grip = DRIFT_GRIP if drifting else GRIP
+
+        # Réduction/lissage de la composante latérale (simule adhérence)
+        # méthode simple : vel_r *= (1 - grip * dt) mais on garde stabilité
+        lateral_factor = max(0.0, 1.0 - grip * dt)
+        vel_r *= lateral_factor
+
+        # Pendant le drift, ajouter un petit "slip" contrôlé par la direction du volant
+        if drifting and steer != 0 and velocity.length() > 10.0:
+            # sens du drift: si on tourne à gauche, on pousse latéralement selon droite/opposé
+            slip = right * (steer * -1.0)  # négatif pour pousser dans le bon sens
+            # un slip proportionnel à la vitesse avant
+            slip_strength = DRIFT_SLIP_FORCE * (abs(forward_speed) / MAX_SPEED)
+            vel_r += slip * slip_strength * dt
+
+        # Recomposer la vélocité à partir des composantes locales modifiées
+        velocity = vel_f + vel_r
+
+        # Appliquer une faible traînée sur la vitesse avant pour éviter speed infini
+        if velocity.length() > 0:
+            # résister proportionnellement à la vitesse
+            velocity -= velocity * (FORWARD_DRAG * dt * 0.1)
+
+        # Mise à jour de la position
+        pos += velocity * dt
+
+        # Rendu
+        screen.fill((10, 10, 10))
+
+        # surface tournée, centrage
+        rotated = pg.transform.rotate(car_surf, -math.degrees(angle))
+        rect = rotated.get_rect(center=(round(pos.x), round(pos.y)))
+        screen.blit(rotated, rect.topleft)
+
+        # affichage debug
+        info = [
+            f"speed: {velocity.length():.1f}",
+            f"forward_speed: {forward_speed:.1f}",
+            f"drifting: {drifting}",
+            f"angle(deg): {math.degrees(angle)%360:.1f}"
+        ]
+        y = 5
+        for line in info:
+            screen.blit(font.render(line, True, (200, 200, 200)), (5, y))
+            y += 18
+
+        pg.display.flip()
+
+    pg.quit()
+
+if __name__ == "__main__":
+    main()
+# ...existing code...
