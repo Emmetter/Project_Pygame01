@@ -5,11 +5,13 @@ import random
 SCREEN_WIDTH = 1920 / 2
 SCREEN_HEIGHT = 1080 / 2
 FPS = 60
-MAX_SPEED = 600
+MAX_SPEED = 1000
 PLAYER_SIZE = 20
 
 ACCELERATION = 1200
 DRIFT_THRESHOLD = 100
+
+BACKGROUND_PATH = "assets/racing_track.png"
 
 # Physique plus glissante
 STEER_SPEED_NORMAL = 3.5
@@ -17,9 +19,46 @@ STEER_SPEED_DRIF = 4.5
 NORMAL_LONG_FRIC = 2.5
 NORMAL_LAT_FRIC = 4.0
 DRIFT_LONG_FRIC = 4.0
-DRIFT_LAT_FRIC = 0.05    # TRÈS GLISSANT
+DRIFT_LAT_FRIC = 0.08    # TRÈS GLISSANT
 AIR_DRAG_COEFF = 1.2
 ROLLING_RESIST = 120
+
+def load_background():
+    try:
+        bg_image = pg.image.load(BACKGROUND_PATH).convert()
+        bg_image = pg.transform.scale(bg_image, (SCREEN_WIDTH, SCREEN_HEIGHT))
+        return bg_image
+    except FileNotFoundError:
+        print(f"❌ {BACKGROUND_PATH} manquante.")
+        return None
+    
+def draw_background(screen, bg_image):
+    if bg_image:
+        screen.blit(bg_image, (0, 0))
+    else:
+        screen.fill((30, 30, 50))
+
+def emit_particles(particles, player_pos, player_angle, is_drifting, side_vel, velocity, dt):
+    if is_drifting and side_vel.length() > 20:
+        # Offset arrière dans le repère de la voiture (avant rotation)
+        rear_offset_local = pg.Vector2(-PLAYER_SIZE * 1.6 / 2, 0)  # Arrière
+        rear_offset = rear_offset_local.rotate(math.degrees(player_angle))  # Roté
+        
+        for _ in range(5):
+            # Petit offset aléatoire autour de l'arrière
+            smoke_off = pg.Vector2(random.uniform(-6, -16), random.uniform(-8, 8))
+            smoke_off = smoke_off.rotate(math.degrees(player_angle))
+            
+            # Vélocité de la particule : un peu de vitesse voiture + poussée arrière
+            particle_vel = velocity * 0.15 + rear_offset.normalize() * -8
+            
+            particles.append({
+                'pos': player_pos + rear_offset + smoke_off,
+                'life': random.uniform(0.7, 1.3),
+                'size': random.uniform(5, 12),
+                'velocity': particle_vel
+            })
+
 
 def get_inputs():
     keys = pg.key.get_pressed()
@@ -90,28 +129,6 @@ def draw_car(screen, unrot_surf, player_pos, player_angle):
     rot_rect = rot_surf.get_rect(center=unrot_rect.center)
     screen.blit(rot_surf, rot_rect.topleft)
 
-def emit_particles(particles, player_pos, player_angle, is_drifting, side_vel, velocity, dt):
-    """Émet des particules à l'arrière"""
-    if is_drifting and side_vel.length() > 20:
-        # Offset arrière dans le repère de la voiture (avant rotation)
-        rear_offset_local = pg.Vector2(-PLAYER_SIZE * 1.6 / 2, 0)  # Arrière
-        rear_offset = rear_offset_local.rotate(math.degrees(player_angle))  # Roté
-        
-        for _ in range(5):
-            # Petit offset aléatoire autour de l'arrière
-            smoke_off = pg.Vector2(random.uniform(-6, -16), random.uniform(-8, 8))
-            smoke_off = smoke_off.rotate(math.degrees(player_angle))
-            
-            # Vélocité de la particule : un peu de vitesse voiture + poussée arrière
-            particle_vel = velocity * 0.15 + rear_offset.normalize() * -8
-            
-            particles.append({
-                'pos': player_pos + rear_offset + smoke_off,
-                'life': random.uniform(0.7, 1.3),
-                'size': random.uniform(5, 12),
-                'velocity': particle_vel
-            })
-
 def update_and_draw_particles(screen, particles, dt):
     for p in particles[:]:
         p['life'] -= dt
@@ -149,6 +166,8 @@ def main():
     running = True
     font = pg.font.Font(None, 24)
     particles = []
+
+    bg_image = load_background()
     
     player_pos = pg.Vector2(screen.get_width() / 2, screen.get_height() / 2)
     velocity = pg.Vector2(0, 0)
@@ -162,7 +181,7 @@ def main():
             if event.type == pg.QUIT:
                 running = False
 
-        screen.fill("black")
+        draw_background(screen, bg_image)
         
         steer_input, throttle, space_pressed = get_inputs()
         speed = velocity.length()
